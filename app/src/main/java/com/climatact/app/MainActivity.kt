@@ -9,6 +9,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -669,21 +670,6 @@ private fun fetchAirQuality(latitude: Double, longitude: Double): AirQualityData
     } catch (_: Exception) {
         AirQualityData(0, 0.0, 0.0)
     }
-}
-
-private fun searchPlace(name: String): Place? {
-    val encoded = URLEncoder.encode(name.trim(), "UTF-8")
-    val url = URL("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=1&language=en&format=json")
-    val json = getJson(url)
-    val results = json.optJSONArray("results") ?: return null
-    if (results.length() == 0) return null
-    val item = results.getJSONObject(0)
-    return Place(
-        item.optString("name", name),
-        item.getDouble("latitude"),
-        item.getDouble("longitude"),
-        item.optString("country", "")
-    )
 }
 
 private fun fetchWeather(place: Place): WeatherData {
