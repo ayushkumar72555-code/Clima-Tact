@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -117,7 +118,7 @@ fun ClimaTactApp() {
                 val place = selected ?: searchPlace(city)
                     ?: throw IllegalArgumentException("Location not found")
                 val result = fetchWeather(place)
-                runOnUiThread {
+                (context as ComponentActivity).runOnUiThread {
                     weather = result
                     query = result.city
                     suggestions = emptyList()
@@ -127,6 +128,30 @@ fun ClimaTactApp() {
             } catch (e: Exception) {
                 runOnUiThread {
                     error = e.message ?: "Unable to load weather"
+                    loading = false
+                }
+            }
+        }.start()
+    }
+
+    fun loadWeatherByCoordinates(latitude: Double, longitude: Double) {
+        loading = true
+        error = null
+        Thread {
+            try {
+                val place = Place("Current location", latitude, longitude, "")
+                val result = fetchWeather(place)
+                (context as ComponentActivity).runOnUiThread {
+                    weather = result
+                    query = result.city
+                    suggestions = emptyList()
+                    loading = false
+                    error = null
+                    saveFavorite(place)
+                }
+            } catch (e: Exception) {
+                (context as ComponentActivity).runOnUiThread {
+                    error = e.message ?: "Unable to load current location"
                     loading = false
                 }
             }
@@ -170,9 +195,24 @@ fun ClimaTactApp() {
             containerColor = Color(0xFF071018),
             bottomBar = {
                 NavigationBar(containerColor = Color(0xFF0B161E)) {
-                    NavigationBarItem(screen == 0, { screen = 0 }, { Icon(Icons.Default.WbSunny, null) }, { Text("Weather") })
-                    NavigationBarItem(screen == 1, { screen = 1 }, { Icon(Icons.Default.Radar, null) }, { Text("Atmosphere") })
-                    NavigationBarItem(screen == 2, { screen = 2 }, { Icon(Icons.Default.Timeline, null) }, { Text("Climate") })
+                    NavigationBarItem(
+                        selected = screen == 0,
+                        onClick = { screen = 0 },
+                        icon = { Icon(Icons.Default.WbSunny, null) },
+                        label = { Text("Weather") }
+                    )
+                    NavigationBarItem(
+                        selected = screen == 1,
+                        onClick = { screen = 1 },
+                        icon = { Icon(Icons.Default.Radar, null) },
+                        label = { Text("Atmosphere") }
+                    )
+                    NavigationBarItem(
+                        selected = screen == 2,
+                        onClick = { screen = 2 },
+                        icon = { Icon(Icons.Default.Timeline, null) },
+                        label = { Text("Climate") }
+                    )
                 }
             }
         ) { padding ->
