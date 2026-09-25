@@ -13,11 +13,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -227,19 +235,89 @@ private fun TemperatureChart(values: List<Double>) {
 @Composable
 private fun AtmosphereScreen(data: WeatherData) {
     Text("ATMOSPHERIC VISUALIZER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-    Surface(shape = RoundedCornerShape(28.dp), color = Color(0xFF0E2633), modifier = Modifier.fillMaxWidth().height(320.dp)) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(weatherIcon(data.weatherCode), null, tint = Color(0xFF62D8FF), modifier = Modifier.size(120.dp))
-            Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
-                Text("${weatherDescription(data.weatherCode)} • ${data.wind.roundToInt()} km/h wind", fontWeight = FontWeight.Bold)
-                Text("Live conditions from the forecast model", color = Color(0xFF8EA5B4))
-            }
-        }
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = Color(0xFF0E2633),
+        modifier = Modifier.fillMaxWidth().height(320.dp)
+    ) {
+        AtmosphericCanvas(data.weatherCode, data.precipitationProbability, data.windDirection)
     }
     InfoCard("RAIN PROBABILITY", "${data.precipitationProbability}%", "Current hourly precipitation probability", Icons.Default.WaterDrop)
     InfoCard("WIND DIRECTION", "${data.windDirection}°", compassDirection(data.windDirection), Icons.Default.Explore)
 }
 
+@Composable
+private fun AtmosphericCanvas(weatherCode: Int, rainProbability: Int, windDirection: Int) {
+    val transition = rememberInfiniteTransition(label = "atmosphere")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
+        label = "phase"
+    )
+
+    Box(Modifier.fillMaxSize()) {
+        Canvas(Modifier.fillMaxSize().padding(16.dp)) {
+            val center = Offset(size.width / 2f, size.height / 2f - 10f)
+            val base = if (weatherCode in 51..82 || weatherCode in 95..99) Color(0xFF54C8FF) else Color(0xFF8EE7FF)
+
+            for (ring in 1..4) {
+                val radius = 42f + ring * 32f + sin((phase * 6.283f) + ring) * 6f
+                drawCircle(
+                    color = base.copy(alpha = 0.13f),
+                    radius = radius,
+                    center = center,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                )
+            }
+
+            val direction = Math.toRadians(windDirection.toDouble())
+            val dx = cos(direction).toFloat()
+            val dy = sin(direction).toFloat()
+
+            for (i in 0 until 10) {
+                val progress = (phase + i / 10f) % 1f
+                val start = Offset(
+                    center.x - dx * size.width * 0.55f + dx * size.width * progress,
+                    center.y - dy * size.height * 0.55f + dy * size.height * progress
+                )
+                drawLine(
+                    color = base.copy(alpha = 0.12f + progress * 0.35f),
+                    start = start,
+                    end = Offset(start.x + dx * 46f, start.y + dy * 46f),
+                    strokeWidth = 3f
+                )
+            }
+
+            if (rainProbability >= 20 || weatherCode in 51..67 || weatherCode in 80..82) {
+                for (i in 0 until 55) {
+                    val x = (i * 47f) % size.width
+                    val y = ((phase + i / 55f) % 1f) * size.height
+                    drawLine(
+                        color = base.copy(alpha = 0.18f + rainProbability / 500f),
+                        start = Offset(x, y),
+                        end = Offset(x - 4f, y + 14f),
+                        strokeWidth = 2f
+                    )
+                }
+            }
+        }
+
+        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(weatherIcon(weatherCode), null, tint = Color(0xFFB9F0FF), modifier = Modifier.size(76.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(weatherDescription(weatherCode), fontWeight = FontWeight.Bold)
+            Text("Wind " + compassDirection(windDirection), color = Color(0xFF8EA5B4), style = MaterialTheme.typography.labelMedium)
+        }
+
+        Text(
+            "LIVE ATMOSPHERIC FLOW",
+            modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            color = Color(0xFF8EA5B4),
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
 @Composable
 private fun ClimateScreen(data: WeatherData) {
     Text("CLIMATE CONTEXT", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
