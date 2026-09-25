@@ -1,0 +1,23 @@
+# Android Studio
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Local Android configuration
+local.properties
+
+# JVM crash and heap dumps
+*.hprof
+*.heapdump
+hs_err_pid*
+
+# Kotlin / Java generated files
+*.class
+
+# OS files
+.DS_Store
+Thumbs.db
