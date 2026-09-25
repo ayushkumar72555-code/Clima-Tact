@@ -252,22 +252,40 @@ private fun AtmosphericCanvas(weatherCode: Int, rainProbability: Int, windDirect
     val phase by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(5200, easing = LinearEasing), RepeatMode.Restart),
         label = "phase"
+    )
+    val pulse by transition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            tween(1800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            RepeatMode.Reverse
+        ),
+        label = "pulse"
     )
 
     Box(Modifier.fillMaxSize()) {
-        Canvas(Modifier.fillMaxSize().padding(16.dp)) {
-            val center = Offset(size.width / 2f, size.height / 2f - 10f)
-            val base = if (weatherCode in 51..82 || weatherCode in 95..99) Color(0xFF54C8FF) else Color(0xFF8EE7FF)
+        Canvas(Modifier.fillMaxSize().padding(12.dp)) {
+            val center = Offset(size.width / 2f, size.height / 2f - 4f)
+            val storm = weatherCode in 95..99
+            val wet = rainProbability >= 20 || weatherCode in 51..82
+            val base = when {
+                storm -> Color(0xFFB89CFF)
+                wet -> Color(0xFF54C8FF)
+                else -> Color(0xFF8EE7FF)
+            }
 
-            for (ring in 1..4) {
-                val radius = 42f + ring * 32f + sin((phase * 6.283f) + ring) * 6f
+            drawCircle(color = base.copy(alpha = 0.035f), radius = 130f * pulse, center = center)
+
+            for (ring in 1..5) {
+                val wave = (phase + ring * 0.16f) % 1f
+                val radius = 34f + wave * 150f
                 drawCircle(
-                    color = base.copy(alpha = 0.13f),
+                    color = base.copy(alpha = (0.22f * (1f - wave)).coerceAtLeast(0.025f)),
                     radius = radius,
                     center = center,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f)
                 )
             }
 
@@ -275,47 +293,79 @@ private fun AtmosphericCanvas(weatherCode: Int, rainProbability: Int, windDirect
             val dx = cos(direction).toFloat()
             val dy = sin(direction).toFloat()
 
-            for (i in 0 until 10) {
-                val progress = (phase + i / 10f) % 1f
-                val start = Offset(
-                    center.x - dx * size.width * 0.55f + dx * size.width * progress,
-                    center.y - dy * size.height * 0.55f + dy * size.height * progress
-                )
+            for (i in 0 until 18) {
+                val seed = i / 18f
+                val progress = (phase * 1.15f + seed) % 1f
+                val side = (i % 6 - 2.5f) * 28f
+                val along = progress * size.maxDimension * 1.25f - size.maxDimension * 0.62f
+                val px = -dy * side
+                val py = dx * side
+                val startPoint = Offset(center.x + dx * along + px, center.y + dy * along + py)
+                val length = 26f + (i % 4) * 10f
                 drawLine(
-                    color = base.copy(alpha = 0.12f + progress * 0.35f),
-                    start = start,
-                    end = Offset(start.x + dx * 46f, start.y + dy * 46f),
-                    strokeWidth = 3f
+                    color = base.copy(alpha = 0.10f + (1f - progress) * 0.30f),
+                    start = startPoint,
+                    end = Offset(startPoint.x + dx * length, startPoint.y + dy * length),
+                    strokeWidth = 2.5f
                 )
             }
 
-            if (rainProbability >= 20 || weatherCode in 51..67 || weatherCode in 80..82) {
-                for (i in 0 until 55) {
-                    val x = (i * 47f) % size.width
-                    val y = ((phase + i / 55f) % 1f) * size.height
+            if (wet) {
+                for (i in 0 until 80) {
+                    val x = (i * 43f + i * i * 3f) % size.width
+                    val fall = (phase * 1.6f + i / 80f) % 1f
+                    val y = fall * (size.height + 60f) - 30f
+                    val alpha = (0.08f + rainProbability / 380f).coerceAtMost(0.45f)
                     drawLine(
-                        color = base.copy(alpha = 0.18f + rainProbability / 500f),
+                        color = base.copy(alpha = alpha),
                         start = Offset(x, y),
-                        end = Offset(x - 4f, y + 14f),
-                        strokeWidth = 2f
+                        end = Offset(x - 5f, y + 18f),
+                        strokeWidth = 1.8f
                     )
                 }
             }
+
+            if (storm) {
+                val flash = (sin(phase * 6.283f * 3f) + 1f) / 2f
+                drawCircle(
+                    color = Color(0xFFE9D8FF).copy(alpha = flash * 0.10f),
+                    radius = 105f,
+                    center = center
+                )
+            }
         }
 
-        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(weatherIcon(weatherCode), null, tint = Color(0xFFB9F0FF), modifier = Modifier.size(76.dp))
-            Spacer(Modifier.height(8.dp))
-            Text(weatherDescription(weatherCode), fontWeight = FontWeight.Bold)
-            Text("Wind " + compassDirection(windDirection), color = Color(0xFF8EA5B4), style = MaterialTheme.typography.labelMedium)
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .size((112 * pulse).dp)
+                .background(Color(0xFF102B38).copy(alpha = 0.88f), RoundedCornerShape(56.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(weatherIcon(weatherCode), null, tint = Color(0xFFB9F0FF), modifier = Modifier.size(62.dp))
         }
 
-        Text(
-            "LIVE ATMOSPHERIC FLOW",
-            modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-            color = Color(0xFF8EA5B4),
-            style = MaterialTheme.typography.labelSmall
-        )
+        Column(Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+            Text(
+                "LIVE ATMOSPHERIC FLOW",
+                color = if (weatherCode in 95..99) Color(0xFFB89CFF) else Color(0xFF8EE7FF),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(weatherDescription(weatherCode), color = Color.White, fontWeight = FontWeight.SemiBold)
+        }
+
+        Surface(
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+            color = Color(0xFF071820).copy(alpha = 0.78f),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Air, null, tint = if (weatherCode in 95..99) Color(0xFFB89CFF) else Color(0xFF8EE7FF), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(windDirection.toString() + "°", style = MaterialTheme.typography.labelMedium)
+            }
+        }
     }
 }
 @Composable
