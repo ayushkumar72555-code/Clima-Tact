@@ -1,7 +1,13 @@
 package com.climatact.app
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -13,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -58,7 +65,14 @@ private data class WeatherData(
     val visibility: Int,
     val sunrise: String,
     val sunset: String,
-    val daily: List<DailyForecast>
+    val daily: List<DailyForecast>,
+    val airQuality: AirQualityData
+)
+
+private data class AirQualityData(
+    val aqi: Int,
+    val pm25: Double,
+    val pm10: Double
 )
 
 private data class DailyForecast(
@@ -84,20 +98,30 @@ fun ClimaTactApp() {
     var query by remember { mutableStateOf("Lucknow") }
     var weather by remember { mutableStateOf<WeatherData?>(null) }
     var loading by remember { mutableStateOf(true) }
+    val context = LocalContext.current
     var error by remember { mutableStateOf<String?>(null) }
+    var suggestions by remember { mutableStateOf<List<Place>>(emptyList()) }
+    var favorites by remember { mutableStateOf<List<Place>>(emptyList()) }
+    var showFavorites by remember { mutableStateOf(false) }
 
-    fun loadWeather(city: String) {
+    fun saveFavorite(place: Place) {
+        favorites = (favorites.filterNot { it.name == place.name } + place).takeLast(6)
+    }
+
+    fun loadWeather(city: String, selected: Place? = null) {
         loading = true
         error = null
         Thread {
             try {
-                val place = searchPlace(city)
+                val place = selected ?: searchPlace(city)
                     ?: throw IllegalArgumentException("Location not found")
                 val result = fetchWeather(place)
                 runOnUiThread {
                     weather = result
                     query = result.city
+                    suggestions = emptyList()
                     loading = false
+                    saveFavorite(place)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -110,6 +134,28 @@ fun ClimaTactApp() {
 
     LaunchedEffect(Unit) {
         loadWeather("Lucknow")
+    }
+
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
+            getLastKnownLocation(context)?.let { loadWeatherByCoordinates(it.latitude, it.longitude) }
+        }
+    }
+
+    LaunchedEffect(query) {
+        if (query.length >= 2) {
+            Thread {
+                try {
+                    val found = searchPlaces(query)
+                    runOnUiThread { suggestions = found }
+                } catch (_: Exception) {
+                    runOnUiThread { suggestions = emptyList() }
+                }
+            }.start()
+        } else suggestions = emptyList()
     }
 
     MaterialTheme(
@@ -149,6 +195,61 @@ fun ClimaTactApp() {
                     label = { Text("Location") },
                     singleLine = true
                 )
+
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = {
+                            val fine = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                            val coarse = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+                            if (fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED) {
+                                getLastKnownLocation(context)?.let { loadWeatherByCoordinates(it.latitude, it.longitude) }
+                            } else {
+                                locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.MyLocation, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Current location")
+                    }
+                    OutlinedButton(onClick = { showFavorites = !showFavorites }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Star, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Favorites")
+                    }
+                }
+
+                if (suggestions.isNotEmpty()) {
+                    Surface(shape = RoundedCornerShape(22.dp), color = Color(0xFF10232E), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(8.dp)) {
+                            suggestions.forEach { place ->
+                                TextButton(onClick = { loadWeather(place.name, place) }, modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Text(place.name, fontWeight = FontWeight.SemiBold)
+                                        Text(place.country, color = Color(0xFF8EA5B4), style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showFavorites && favorites.isNotEmpty()) {
+                    Surface(shape = RoundedCornerShape(22.dp), color = Color(0xFF10232E), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(8.dp)) {
+                            favorites.reversed().forEach { place ->
+                                TextButton(onClick = { showFavorites = false; loadWeather(place.name, place) }, modifier = Modifier.fillMaxWidth()) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(place.name, fontWeight = FontWeight.SemiBold)
+                                        Text(place.country, color = Color(0xFF8EA5B4))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 when {
                     loading -> LoadingCard()
@@ -202,12 +303,16 @@ private fun InfoCard(title: String, value: String, detail: String, icon: android
 
 @Composable
 private fun WeatherScreen(data: WeatherData) {
+    WeatherHero(data)
     InfoCard("NOW • ${data.city.uppercase(Locale.getDefault())}", "${data.temperature.roundToInt()}°", "${weatherDescription(data.weatherCode)} • Feels like ${data.apparent.roundToInt()}°", weatherIcon(data.weatherCode))
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
         MetricCard("HUMIDITY", "${data.humidity}%", Icons.Default.WaterDrop, Modifier.weight(1f))
         MetricCard("WIND", "${data.wind.roundToInt()} km/h", Icons.Default.Air, Modifier.weight(1f))
     }
     InfoCard("PRESSURE", "${data.pressure.roundToInt()} hPa", "Sea-level atmospheric pressure", Icons.Default.Speed)
+
+    Text("AIR QUALITY", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    InfoCard("AIR QUALITY INDEX", "${data.airQuality.aqi}", "PM2.5 ${data.airQuality.pm25.roundToInt()} µg/m³ • PM10 ${data.airQuality.pm10.roundToInt()} µg/m³", Icons.Default.Air)
 
     Text("ATMOSPHERIC DETAILS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -240,6 +345,51 @@ private fun WeatherScreen(data: WeatherData) {
 
     Text("7 DAY OUTLOOK", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     DailyForecastList(data.daily)
+}
+
+
+@Composable
+private fun WeatherHero(data: WeatherData) {
+    val transition = rememberInfiniteTransition(label = "sky")
+    val drift by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Reverse), label = "drift")
+    val isNight = try {
+        val now = java.time.LocalTime.now()
+        val sunrise = java.time.LocalTime.parse(data.sunrise.substringAfter("T").take(5))
+        val sunset = java.time.LocalTime.parse(data.sunset.substringAfter("T").take(5))
+        now.isBefore(sunrise) || now.isAfter(sunset)
+    } catch (_: Exception) { false }
+
+    Surface(shape = RoundedCornerShape(32.dp), color = if (isNight) Color(0xFF111A3A) else Color(0xFF123B56), modifier = Modifier.fillMaxWidth().height(220.dp)) {
+        Box {
+            Canvas(Modifier.fillMaxSize()) {
+                if (isNight) {
+                    for (i in 0 until 30) {
+                        val x = (i * 71f + drift * 40f) % size.width
+                        val y = (i * 37f) % size.height
+                        drawCircle(Color(0xFFDDF5FF).copy(alpha = 0.35f), 1.7f, Offset(x, y))
+                    }
+                } else {
+                    val sunX = size.width * (0.72f + 0.06f * sin(drift * Math.PI).toFloat())
+                    drawCircle(Color(0xFFFFD66B).copy(alpha = 0.16f), 64f, Offset(sunX, 58f))
+                    drawCircle(Color(0xFFFFD66B), 31f, Offset(sunX, 58f))
+                }
+                val cloudAlpha = if (data.weatherCode in 1..3 || data.cloudCover > 35) 0.55f else 0.20f
+                for (i in 0 until 4) {
+                    val x = ((i * 130f + drift * 70f) % (size.width + 150f)) - 75f
+                    val y = 115f + (i % 2) * 25f
+                    drawCircle(Color.White.copy(alpha = cloudAlpha), 28f, Offset(x, y))
+                    drawCircle(Color.White.copy(alpha = cloudAlpha), 38f, Offset(x + 30f, y - 8f))
+                    drawCircle(Color.White.copy(alpha = cloudAlpha), 25f, Offset(x + 60f, y + 4f))
+                }
+            }
+            Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
+                Text(if (isNight) "NIGHT SKY" else "LIVE SKY", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.labelMedium)
+                Text("${data.city}, ${data.country}", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text(weatherDescription(data.weatherCode), color = Color.White.copy(alpha = 0.85f))
+            }
+            Icon(weatherIcon(data.weatherCode), null, tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(22.dp).size(48.dp))
+        }
+    }
 }
 
 @Composable
@@ -471,6 +621,56 @@ private fun ClimateScreen(data: WeatherData) {
     InfoCard("PRECIPITATION SIGNAL", "${data.precipitationProbability}%", "Short-term atmospheric probability, not a climate indicator.", Icons.Default.Cloud)
 }
 
+
+private fun searchPlaces(name: String): List<Place> {
+    val encoded = URLEncoder.encode(name.trim(), "UTF-8")
+    val url = URL("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=5&language=en&format=json")
+    val results = getJson(url).optJSONArray("results") ?: return emptyList()
+    return (0 until results.length()).map {
+        val item = results.getJSONObject(it)
+        Place(item.optString("name", name), item.getDouble("latitude"), item.getDouble("longitude"), item.optString("country", ""))
+    }
+}
+
+private fun searchPlace(name: String): Place? = searchPlaces(name).firstOrNull()
+
+private fun getLastKnownLocation(context: Context): Location? {
+    val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    return try {
+        manager.getProviders(true).mapNotNull { provider ->
+            try { manager.getLastKnownLocation(provider) } catch (_: SecurityException) { null }
+        }.maxByOrNull { it.time }
+    } catch (_: Exception) { null }
+}
+
+private fun loadWeatherByCoordinates(latitude: Double, longitude: Double) {
+    Thread {
+        try {
+            val place = Place("Current location", latitude, longitude, "")
+            val result = fetchWeather(place)
+            runOnUiThread {
+                weather = result
+                query = result.city
+                suggestions = emptyList()
+                loading = false
+                error = null
+            }
+        } catch (e: Exception) {
+            runOnUiThread { error = e.message ?: "Unable to load current location"; loading = false }
+        }
+    }.start()
+}
+
+private fun fetchAirQuality(latitude: Double, longitude: Double): AirQualityData {
+    return try {
+        val url = URL("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=$latitude&longitude=$longitude&current=us_aqi,pm2_5,pm10&timezone=auto")
+        val current = getJson(url).getJSONObject("current")
+        AirQualityData(current.optDouble("us_aqi", 0.0).roundToInt(), current.optDouble("pm2_5", 0.0), current.optDouble("pm10", 0.0))
+    } catch (_: Exception) {
+        AirQualityData(0, 0.0, 0.0)
+    }
+}
+
 private fun searchPlace(name: String): Place? {
     val encoded = URLEncoder.encode(name.trim(), "UTF-8")
     val url = URL("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=1&language=en&format=json")
@@ -530,6 +730,8 @@ private fun fetchWeather(place: Place): WeatherData {
         )
     }
 
+    val air = fetchAirQuality(place.latitude, place.longitude)
+
     return WeatherData(
         city = place.name,
         country = place.country,
@@ -550,7 +752,8 @@ private fun fetchWeather(place: Place): WeatherData {
         visibility = current.optInt("visibility", 0),
         sunrise = sunriseArray.optString(0, ""),
         sunset = sunsetArray.optString(0, ""),
-        daily = dailyForecasts
+        daily = dailyForecasts,
+        airQuality = air
     )
 }
 
