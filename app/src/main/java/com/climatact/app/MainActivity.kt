@@ -51,7 +51,22 @@ private data class WeatherData(
     val precipitationProbability: Int,
     val times: List<String>,
     val hourlyTemperatures: List<Double>,
-    val hourlyRainProbability: List<Int>
+    val hourlyRainProbability: List<Int>,
+    val uvIndex: Double,
+    val cloudCover: Int,
+    val dewPoint: Double,
+    val visibility: Int,
+    val sunrise: String,
+    val sunset: String,
+    val daily: List<DailyForecast>
+)
+
+private data class DailyForecast(
+    val date: String,
+    val weatherCode: Int,
+    val maxTemp: Double,
+    val minTemp: Double,
+    val rainProbability: Int
 )
 
 private data class Place(val name: String, val latitude: Double, val longitude: Double, val country: String)
@@ -193,9 +208,89 @@ private fun WeatherScreen(data: WeatherData) {
         MetricCard("WIND", "${data.wind.roundToInt()} km/h", Icons.Default.Air, Modifier.weight(1f))
     }
     InfoCard("PRESSURE", "${data.pressure.roundToInt()} hPa", "Sea-level atmospheric pressure", Icons.Default.Speed)
+
+    Text("ATMOSPHERIC DETAILS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        MetricCard("UV INDEX", String.format(Locale.US, "%.1f", data.uvIndex), Icons.Default.WbSunny, Modifier.weight(1f))
+        MetricCard("CLOUD COVER", "${data.cloudCover}%", Icons.Default.Cloud, Modifier.weight(1f))
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        MetricCard("DEW POINT", "${data.dewPoint.roundToInt()}°C", Icons.Default.WaterDrop, Modifier.weight(1f))
+        MetricCard("VISIBILITY", "${(data.visibility / 1000.0).roundToInt()} km", Icons.Default.Visibility, Modifier.weight(1f))
+    }
+
+    Surface(shape = RoundedCornerShape(24.dp), color = Color(0xFF10232E), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(18.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text("SUNRISE", color = Color(0xFF8EA5B4), style = MaterialTheme.typography.labelMedium)
+                Text(formatClock(data.sunrise), fontWeight = FontWeight.Bold)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("SUNSET", color = Color(0xFF8EA5B4), style = MaterialTheme.typography.labelMedium)
+                Text(formatClock(data.sunset), fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
     Text("NEXT 12 HOURS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     TemperatureChart(data.hourlyTemperatures.take(12))
+
+    Text("7 DAY OUTLOOK", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    DailyForecastList(data.daily)
 }
+
+@Composable
+private fun DailyForecastList(days: List<DailyForecast>) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+        days.forEach { day ->
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFF10232E),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        formatDay(day.date),
+                        modifier = Modifier.width(72.dp),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Icon(
+                        weatherIcon(day.weatherCode),
+                        null,
+                        tint = Color(0xFF62D8FF),
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(weatherDescription(day.weatherCode), style = MaterialTheme.typography.bodyMedium)
+                        Text("Rain ${day.rainProbability}%", color = Color(0xFF8EA5B4), style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(
+                        "${day.maxTemp.roundToInt()}° / ${day.minTemp.roundToInt()}°",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatClock(value: String): String =
+    value.substringAfter("T", value).take(5)
+
+private fun formatDay(value: String): String =
+    try {
+        val date = java.time.LocalDate.parse(value)
+        date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault())
+    } catch (_: Exception) {
+        value.takeLast(5)
+    }
 
 @Composable
 private fun MetricCard(title: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier) {
@@ -395,9 +490,10 @@ private fun fetchWeather(place: Place): WeatherData {
     val url = URL(
         "https://api.open-meteo.com/v1/forecast" +
             "?latitude=${place.latitude}&longitude=${place.longitude}" +
-            "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m" +
+            "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m,uv_index,cloud_cover,dew_point_2m,visibility" +
             "&hourly=temperature_2m,precipitation_probability" +
-            "&forecast_days=2&timezone=auto"
+            "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset" +
+            "&forecast_days=7&timezone=auto"
     )
     val json = getJson(url)
     val current = json.getJSONObject("current")
@@ -405,6 +501,14 @@ private fun fetchWeather(place: Place): WeatherData {
     val timesArray = hourly.getJSONArray("time")
     val tempArray = hourly.getJSONArray("temperature_2m")
     val rainArray = hourly.getJSONArray("precipitation_probability")
+    val daily = json.getJSONObject("daily")
+    val dailyDates = daily.getJSONArray("time")
+    val dailyCodes = daily.getJSONArray("weather_code")
+    val dailyMax = daily.getJSONArray("temperature_2m_max")
+    val dailyMin = daily.getJSONArray("temperature_2m_min")
+    val dailyRain = daily.getJSONArray("precipitation_probability_max")
+    val sunriseArray = daily.getJSONArray("sunrise")
+    val sunsetArray = daily.getJSONArray("sunset")
 
     val times = mutableListOf<String>()
     val temps = mutableListOf<Double>()
@@ -413,6 +517,17 @@ private fun fetchWeather(place: Place): WeatherData {
         times += timesArray.getString(i)
         temps += tempArray.getDouble(i)
         rain += rainArray.getInt(i)
+    }
+
+    val dailyForecasts = mutableListOf<DailyForecast>()
+    for (i in 0 until minOf(7, dailyDates.length())) {
+        dailyForecasts += DailyForecast(
+            date = dailyDates.getString(i),
+            weatherCode = dailyCodes.getInt(i),
+            maxTemp = dailyMax.getDouble(i),
+            minTemp = dailyMin.getDouble(i),
+            rainProbability = dailyRain.getInt(i)
+        )
     }
 
     return WeatherData(
@@ -428,7 +543,14 @@ private fun fetchWeather(place: Place): WeatherData {
         precipitationProbability = rain.firstOrNull() ?: 0,
         times = times,
         hourlyTemperatures = temps,
-        hourlyRainProbability = rain
+        hourlyRainProbability = rain,
+        uvIndex = current.optDouble("uv_index", 0.0),
+        cloudCover = current.optInt("cloud_cover", 0),
+        dewPoint = current.optDouble("dew_point_2m", 0.0),
+        visibility = current.optInt("visibility", 0),
+        sunrise = sunriseArray.optString(0, ""),
+        sunset = sunsetArray.optString(0, ""),
+        daily = dailyForecasts
     )
 }
 
