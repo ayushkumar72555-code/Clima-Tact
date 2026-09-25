@@ -1,11 +1,13 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
+    id("com.android.application") version "8.13.0"
+    id("org.jetbrains.kotlin.android") version "2.2.20"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.20"
 }
+
 android {
     namespace = "com.climatact.app"
     compileSdk = 36
+
     defaultConfig {
         applicationId = "com.climatact.app"
         minSdk = 26
@@ -14,6 +16,7 @@ android {
         versionName = "1.0"
     }
 }
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.09.00"))
     implementation("androidx.activity:activity-compose:1.11.0")
